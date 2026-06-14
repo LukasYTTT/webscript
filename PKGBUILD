@@ -6,19 +6,13 @@ pkgdesc="A high-performance reverse proxy and web server language"
 arch=('x86_64')
 url="https://github.com/LukasYTTT/webscript"
 license=('MIT')
-makedepends=('go' 'git')
+makedepends=('go')
 provides=('webscript' 'wbs')
 conflicts=('webscript')
-source=("git+https://github.com/LukasYTTT/webscript.git")
-md5sums=('SKIP')
-
-pkgver() {
-  cd "$srcdir/${pkgname%-git}"
-  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
-}
+source=()
 
 build() {
-  cd "$srcdir/${pkgname%-git}"
+  cd "$startdir"
   export CGO_CPPFLAGS="${CPPFLAGS}"
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
@@ -28,7 +22,7 @@ build() {
 }
 
 package() {
-  cd "$srcdir/${pkgname%-git}"
+  cd "$startdir"
   install -Dm755 wbs "$pkgdir/usr/bin/wbs"
   ln -s /usr/bin/wbs "$pkgdir/usr/bin/webscript"
 }

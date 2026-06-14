@@ -39,7 +39,7 @@ func (s *WebScriptServer) Start(devMode bool) error {
 	handler := &routerHandler{program: s.program}
 
 	if devMode {
-		log.Println("Starte im Dev-Modus (HTTP) auf Port 8080...")
+		log.Println("Starting in Dev mode (HTTP) on port 8080...")
 		return http.ListenAndServe(":8080", handler)
 	}
 
@@ -52,7 +52,7 @@ func (s *WebScriptServer) Start(devMode bool) error {
 		},
 	}
 
-	log.Printf("Starte WebScript Server auf Port 80 und 443 für %v...\n", domains)
+	log.Printf("Starting WebScript Server on port 80 and 443 for %v...\n", domains)
 
 	// Start HTTP server that redirects to HTTPS and handles ACME challenges
 	go func() {
@@ -84,7 +84,7 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if matchedServer == nil {
-		http.Error(w, "Domain nicht konfiguriert in WebScript", http.StatusNotFound)
+		http.Error(w, "Domain not configured in WebScript", http.StatusNotFound)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if matchedRoute == nil {
-		http.Error(w, "Pfad nicht gefunden", http.StatusNotFound)
+		http.Error(w, "Path not found", http.StatusNotFound)
 		return
 	}
 
@@ -128,7 +128,7 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		targetUrl, err := url.Parse(targetURLStr)
 		if err != nil {
-			http.Error(w, "Ungültiges Proxy-Ziel", http.StatusInternalServerError)
+			http.Error(w, "Invalid proxy target", http.StatusInternalServerError)
 			return
 		}
 		proxy := httputil.NewSingleHostReverseProxy(targetUrl)
@@ -151,6 +151,6 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fs := http.StripPrefix(prefix, http.FileServer(http.Dir(folderPath)))
 		fs.ServeHTTP(w, r)
 	default:
-		http.Error(w, "Unbekanntes Ziel", http.StatusInternalServerError)
+		http.Error(w, "Unknown target type", http.StatusInternalServerError)
 	}
 }

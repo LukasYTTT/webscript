@@ -48,7 +48,7 @@ func (p *Parser) ParseProgram() *ast.Program {
 				program.Imports = append(program.Imports, imp)
 			}
 		} else if p.curToken.Type == token.IDENT {
-			// Wir erwarten "http.server"
+			// Expecting "http.server"
 			if p.curToken.Literal == "http" && p.peekToken.Type == token.DOT {
 				p.nextToken() // skip 'http'
 				p.nextToken() // skip '.'
@@ -58,15 +58,15 @@ func (p *Parser) ParseProgram() *ast.Program {
 						program.Servers = append(program.Servers, server)
 					}
 				} else {
-					p.errors = append(p.errors, fmt.Sprintf("erwartete 'server', bekam %q", p.curToken.Literal))
+					p.errors = append(p.errors, fmt.Sprintf("expected 'server', got %q", p.curToken.Literal))
 					p.nextToken()
 				}
 			} else {
-				p.errors = append(p.errors, fmt.Sprintf("erwartete 'http.server', bekam %q", p.curToken.Literal))
+				p.errors = append(p.errors, fmt.Sprintf("expected 'http.server', got %q", p.curToken.Literal))
 				p.nextToken()
 			}
 		} else {
-			p.errors = append(p.errors, fmt.Sprintf("Unerwartetes Token: %q", p.curToken.Literal))
+			p.errors = append(p.errors, fmt.Sprintf("unexpected token: %q", p.curToken.Literal))
 			p.nextToken()
 		}
 	}
@@ -111,7 +111,7 @@ func (p *Parser) parseServer() *ast.Server {
 	server.Routes = []*ast.Route{}
 
 	for p.curToken.Type != token.RBRACE && p.curToken.Type != token.EOF {
-		// Wir erwarten http.route
+		// Expecting http.route
 		if p.curToken.Type == token.IDENT && p.curToken.Literal == "http" {
 			p.nextToken() // skip http
 			if p.curToken.Type == token.DOT {
@@ -124,7 +124,7 @@ func (p *Parser) parseServer() *ast.Server {
 				}
 			}
 		} else {
-			p.errors = append(p.errors, fmt.Sprintf("erwartete 'http.route' oder '}', bekam %q", p.curToken.Literal))
+			p.errors = append(p.errors, fmt.Sprintf("expected 'http.route' or '}', got %q", p.curToken.Literal))
 			p.nextToken()
 		}
 	}
@@ -178,7 +178,7 @@ func (p *Parser) parseTarget() *ast.Target {
 	} else if p.curToken.Type == token.IDENT && p.curToken.Literal == "static" {
 		target.Type = ast.TargetStatic
 	} else {
-		p.errors = append(p.errors, fmt.Sprintf("erwartete 'proxy' oder 'static', bekam %q", p.curToken.Literal))
+		p.errors = append(p.errors, fmt.Sprintf("expected 'proxy' or 'static', got %q", p.curToken.Literal))
 		return nil
 	}
 
@@ -209,6 +209,6 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 }
 
 func (p *Parser) peekError(t token.TokenType) {
-	msg := fmt.Sprintf("erwartete nächstes Token %s, bekam stattdessen %s (Literal: %s)", t, p.peekToken.Type, p.peekToken.Literal)
+	msg := fmt.Sprintf("expected next token to be %s, got %s instead (literal: %s)", t, p.peekToken.Type, p.peekToken.Literal)
 	p.errors = append(p.errors, msg)
 }
