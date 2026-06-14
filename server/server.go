@@ -260,8 +260,18 @@ func (e *Engine) Start(devMode bool) error {
 		server.TLSConfig = &tls.Config{
 			GetCertificate: certManager.GetCertificate,
 		}
+		
+		fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Forwarded-Proto") == "http" || r.Header.Get("CF-Visitor") != "" {
+				handler.ServeHTTP(w, r)
+				return
+			}
+			url := "https://" + r.Host + r.URL.RequestURI()
+			http.Redirect(w, r, url, http.StatusFound)
+		})
+		
 		go func() {
-			log.Fatal(http.ListenAndServe(":80", certManager.HTTPHandler(nil)))
+			log.Fatal(http.ListenAndServe(":80", certManager.HTTPHandler(fallback)))
 		}()
 	} else {
 		// Fallback for default HTTPS without specific domains
