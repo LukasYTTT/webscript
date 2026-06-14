@@ -174,22 +174,52 @@ func (e *Engine) BuiltinPhp(args ...object.Object) object.Object {
 }
 
 func (e *Engine) Start(devMode bool) error {
-	var domains []string
+	var autocertDomains []string
 	var localDomains bool
+	customPorts := make(map[string]bool)
+	needsDefaultPorts := false
+
 	for dom := range e.servers {
-		domains = append(domains, dom)
-		if dom == "localhost" || dom == "127.0.0.1" || strings.HasSuffix(dom, ".localhost") || strings.HasSuffix(dom, ".local") {
+		host := dom
+		port := ""
+		if strings.Contains(dom, ":") {
+			parts := strings.Split(dom, ":")
+			host = parts[0]
+			port = parts[1]
+		}
+
+		if port != "" {
+			customPorts[port] = true
+		} else {
+			needsDefaultPorts = true
+		}
+
+		if host == "localhost" || host == "127.0.0.1" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
 			localDomains = true
+		} else if port == "" {
+			autocertDomains = append(autocertDomains, host)
 		}
 	}
 
 	certManager := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
-		HostPolicy: autocert.HostWhitelist(domains...),
+		HostPolicy: autocert.HostWhitelist(autocertDomains...),
 		Cache:      autocert.DirCache("certs"),
 	}
 
 	handler := &routerHandler{engine: e}
+
+	for port := range customPorts {
+		log.Printf("Starting custom listener on port :%s...\n", port)
+		go func(p string) {
+			log.Fatal(http.ListenAndServe(":"+p, handler))
+		}(port)
+	}
+
+	if !needsDefaultPorts {
+		// Block forever if we only have custom ports
+		select {}
+	}
 
 	if devMode {
 		log.Println("Starting in Dev mode (HTTP) on port 8080...")
@@ -203,23 +233,26 @@ func (e *Engine) Start(devMode bool) error {
 
 	if localDomains {
 		log.Println("Local domains detected. Generating self-signed HTTPS certificates...")
-		cert, err := generateDevCert(domains)
+		cert, err := generateDevCert(append(autocertDomains, "localhost"))
 		if err != nil {
 			return err
 		}
 		server.TLSConfig = &tls.Config{
 			Certificates: []tls.Certificate{*cert},
 		}
-	} else {
+	} else if len(autocertDomains) > 0 {
 		server.TLSConfig = &tls.Config{
 			GetCertificate: certManager.GetCertificate,
 		}
 		go func() {
 			log.Fatal(http.ListenAndServe(":80", certManager.HTTPHandler(nil)))
 		}()
+	} else {
+		// Fallback for default HTTPS without specific domains
+		log.Println("No public domains found for Auto-HTTPS. Waiting for connections...")
 	}
 
-	log.Printf("Starting WebScript Server on port 443 (HTTPS) for %v...\n", domains)
+	log.Printf("Starting WebScript Server on port 443 (HTTPS) for %v...\n", autocertDomains)
 
 	return server.ListenAndServeTLS("", "")
 }
@@ -274,20 +307,24 @@ type routerHandler struct {
 }
 
 func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	host := r.Host
-	if strings.Contains(host, ":") {
-		host = strings.Split(host, ":")[0]
+	hostWithPort := r.Host
+	hostWithoutPort := hostWithPort
+	if strings.Contains(hostWithPort, ":") {
+		hostWithoutPort = strings.Split(hostWithPort, ":")[0]
 	}
 
-	if h.engine.SecureIP && net.ParseIP(host) != nil {
+	if h.engine.SecureIP && net.ParseIP(hostWithoutPort) != nil {
 		http.Error(w, "Forbidden - Direct IP Access Blocked", http.StatusForbidden)
 		return
 	}
 
-	srv, ok := h.engine.servers[host]
+	srv, ok := h.engine.servers[hostWithPort]
 	if !ok {
-		http.Error(w, "Domain not configured in WebScript", http.StatusNotFound)
-		return
+		srv, ok = h.engine.servers[hostWithoutPort]
+		if !ok {
+			http.Error(w, "Domain not configured in WebScript", http.StatusNotFound)
+			return
+		}
 	}
 
 	var matchedTarget *RouteTarget
