@@ -21,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "6.0.2"
+const Version = "6.0.3"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
@@ -42,6 +42,9 @@ func main() {
 		checkForUpdates()
 	case "create":
 		handleCreate()
+		checkForUpdates()
+	case "delete":
+		handleDelete()
 		checkForUpdates()
 	case "service":
 		handleService()
@@ -113,6 +116,7 @@ func printUsage() {
 	fmt.Println("\nUsage:")
 	fmt.Println("  wbs init                  Creates a webscript.json")
 	fmt.Println("  wbs create                Interactively generate a new .ws config file")
+	fmt.Println("  wbs delete [domain]       Delete a configured domain interactively")
 	fmt.Println("  wbs install <url>         Installs a library (e.g. github.com/user/lib)")
 	fmt.Println("  wbs install               Installs all libraries listed in webscript.json")
 	fmt.Println("  wbs run <path> [--dev]    Executes a WebScript configuration file or folder")
@@ -518,4 +522,97 @@ func handleDNS(targetPath string) {
 		fmt.Printf("%-25s %-18s %-18s %s\n", baseDomain, expectedIP, actualIP, status)
 	}
 	fmt.Println("================================================================================")
+}
+
+func handleDelete() {
+	if os.Geteuid() != 0 {
+		fmt.Println("Please run this command as root (sudo wbs delete)")
+		os.Exit(1)
+	}
+
+	confsDir := "/etc/wbs/confs"
+	files, err := ioutil.ReadDir(confsDir)
+	if err != nil {
+		fmt.Printf("Error reading %s: %v\n", confsDir, err)
+		os.Exit(1)
+	}
+
+	var wsFiles []string
+	for _, f := range files {
+		if !f.IsDir() && strings.HasSuffix(f.Name(), ".ws") {
+			wsFiles = append(wsFiles, f.Name())
+		}
+	}
+
+	if len(wsFiles) == 0 {
+		fmt.Println("No configurations found.")
+		return
+	}
+
+	var targetFile string
+
+	if len(os.Args) > 2 {
+		arg := os.Args[2]
+		if !strings.HasSuffix(arg, ".ws") {
+			arg += ".ws"
+		}
+		for _, f := range wsFiles {
+			if f == arg {
+				targetFile = f
+				break
+			}
+		}
+		if targetFile == "" {
+			fmt.Printf("Configuration %s not found.\n", arg)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Println("Available configurations:")
+		for i, f := range wsFiles {
+			fmt.Printf("  %d) %s\n", i+1, f)
+		}
+		fmt.Print("\nSelect configuration to delete (number): ")
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		idx := 0
+		fmt.Sscanf(input, "%d", &idx)
+		if idx < 1 || idx > len(wsFiles) {
+			fmt.Println("Invalid selection.")
+			os.Exit(1)
+		}
+		targetFile = wsFiles[idx-1]
+	}
+
+	if targetFile == "default.ws" {
+		fmt.Println("\n⚠️ WARNING: You are about to delete the default fallback configuration!")
+	}
+
+	fmt.Printf("\nAre you sure you want to delete %s? (y/N): ", targetFile)
+	reader := bufio.NewReader(os.Stdin)
+	confirm, _ := reader.ReadString('\n')
+	confirm = strings.TrimSpace(strings.ToLower(confirm))
+	if confirm != "y" && confirm != "yes" {
+		fmt.Println("Deletion cancelled.")
+		return
+	}
+
+	fullPath := filepath.Join(confsDir, targetFile)
+	err = os.Remove(fullPath)
+	if err != nil {
+		fmt.Printf("Error deleting %s: %v\n", fullPath, err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Successfully deleted %s\n", targetFile)
+	fmt.Println("Restarting WebScript service to apply changes...")
+	
+	cmd := exec.Command("systemctl", "restart", "wbs")
+	err = cmd.Run()
+	if err != nil {
+		fmt.Printf("Failed to restart service: %v\n", err)
+		fmt.Println("Please restart it manually: sudo systemctl restart wbs")
+	} else {
+		fmt.Println("Service restarted successfully. The domain is now offline.")
+	}
 }
