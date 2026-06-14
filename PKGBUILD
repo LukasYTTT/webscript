@@ -1,6 +1,6 @@
 # Maintainer: Lukas <lukas@example.com>
 pkgname=webscript-git
-pkgver=r6.67d1c65
+pkgver=r7.747d0d2
 pkgrel=1
 pkgdesc="A high-performance reverse proxy and web server language"
 arch=('x86_64')
@@ -24,8 +24,7 @@ build() {
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
   export CGO_LDFLAGS="${LDFLAGS}"
-  export GOFLAGS="-buildmode=pie -trimpath -extldflags ${LDFLAGS}"
-  go build -o wbs .
+  go build -trimpath -buildmode=pie -ldflags "-extldflags ${LDFLAGS}" -o wbs .
 }
 
 package() {
