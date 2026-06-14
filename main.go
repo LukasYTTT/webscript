@@ -258,7 +258,8 @@ func handleCreate() {
 	if !isLocal {
 		fmt.Println("\n🌐 Fetching Server IP...")
 		client := http.Client{Timeout: 3 * time.Second}
-		resp, err := client.Get("https://ifconfig.me")
+		// Verwende api.ipify.org, da ifconfig.me bei manchen User-Agents HTML zurückgibt
+		resp, err := client.Get("https://api.ipify.org")
 		var ip string
 		if err == nil {
 			defer resp.Body.Close()
