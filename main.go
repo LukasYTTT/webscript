@@ -21,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "6.0.1"
+const Version = "6.0.2"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
@@ -240,17 +240,15 @@ func handleCreate() {
 	if proxyTarget != "" {
 		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.proxy(\"%s\"))\n", proxyTarget))
 	} else if enablePhp {
-		if indexFileInput != "" {
-			sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.php(\"%s\", \"%s\"))\n", staticPath, indexFileInput))
-		} else {
-			sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.php(\"%s\"))\n", staticPath))
+		if indexFileInput == "" {
+			indexFileInput = "index.php"
 		}
+		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.php(\"%s\", \"%s\"))\n", staticPath, indexFileInput))
 	} else {
-		if indexFileInput != "" {
-			sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.static(\"%s\", \"%s\"))\n", staticPath, indexFileInput))
-		} else {
-			sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.static(\"%s\"))\n", staticPath))
+		if indexFileInput == "" {
+			indexFileInput = "index.html"
 		}
+		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.static(\"%s\", \"%s\"))\n", staticPath, indexFileInput))
 	}
 	sb.WriteString("}\n")
 
