@@ -21,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "6.0.3"
+const Version = "6.0.4"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
@@ -151,7 +151,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/wbs run /etc/wbs/confs
+ExecStart=/usr/local/bin/wbs run /etc/wbs/confs
 Restart=on-failure
 RestartSec=5
 
