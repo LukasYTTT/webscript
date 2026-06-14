@@ -2,48 +2,153 @@ package server
 
 import (
 	"crypto/tls"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"webscript/ast"
+	"webscript/evaluator"
+	"webscript/object"
 
 	"golang.org/x/crypto/acme/autocert"
 )
 
-type WebScriptServer struct {
-	program *ast.Program
+type RouteTarget struct {
+	Type   string
+	Value  string
+	Action *object.Function
 }
 
-func New(program *ast.Program) *WebScriptServer {
-	return &WebScriptServer{
-		program: program,
+type ServerConfig struct {
+	Domain string
+	Routes map[string]RouteTarget
+}
+
+type Engine struct {
+	servers map[string]*ServerConfig
+	current *ServerConfig
+}
+
+func NewEngine() *Engine {
+	return &Engine{
+		servers: make(map[string]*ServerConfig),
 	}
 }
 
-func (s *WebScriptServer) Start(devMode bool) error {
-	// Collect all domains for Let's Encrypt
+// Builtin: http.server(domain, func() { ... })
+func (e *Engine) BuiltinServer(args ...object.Object) object.Object {
+	if len(args) != 2 {
+		return &object.Error{Message: fmt.Sprintf("http.server requires 2 arguments, got %d", len(args))}
+	}
+
+	domainObj, ok := args[0].(*object.String)
+	if !ok {
+		return &object.Error{Message: "http.server first argument must be a string"}
+	}
+
+	blockFunc, ok := args[1].(*object.Function)
+	if !ok {
+		return &object.Error{Message: "http.server second argument must be a block"}
+	}
+
+	srv := &ServerConfig{
+		Domain: domainObj.Value,
+		Routes: make(map[string]RouteTarget),
+	}
+	e.servers[domainObj.Value] = srv
+
+	// Set current context so routes know where to register
+	prev := e.current
+	e.current = srv
+
+	// Execute block
+	evaluator.Eval(blockFunc.Body, blockFunc.Env)
+
+	e.current = prev
+	return evaluator.NULL
+}
+
+// Builtin: http.route(path, target)
+func (e *Engine) BuiltinRoute(args ...object.Object) object.Object {
+	if e.current == nil {
+		return &object.Error{Message: "http.route must be called inside http.server"}
+	}
+	if len(args) != 2 {
+		return &object.Error{Message: "http.route requires 2 arguments"}
+	}
+	pathObj, ok := args[0].(*object.String)
+	if !ok {
+		return &object.Error{Message: "http.route first argument must be a string"}
+	}
+
+	target := RouteTarget{}
+
+	switch obj := args[1].(type) {
+	case *object.String:
+		// Either proxy or static, marked by prefix
+		val := obj.Value
+		if strings.HasPrefix(val, "proxy:") {
+			target.Type = "proxy"
+			target.Value = strings.TrimPrefix(val, "proxy:")
+		} else if strings.HasPrefix(val, "static:") {
+			target.Type = "static"
+			target.Value = strings.TrimPrefix(val, "static:")
+		} else {
+			return &object.Error{Message: "invalid target string"}
+		}
+	case *object.Function:
+		target.Type = "function"
+		target.Action = obj
+	default:
+		return &object.Error{Message: "http.route second argument must be proxy, static, or func"}
+	}
+
+	e.current.Routes[pathObj.Value] = target
+	return evaluator.NULL
+}
+
+func (e *Engine) BuiltinProxy(args ...object.Object) object.Object {
+	if len(args) != 1 {
+		return &object.Error{Message: "http.proxy requires 1 argument"}
+	}
+	urlObj, ok := args[0].(*object.String)
+	if !ok {
+		return &object.Error{Message: "http.proxy argument must be string"}
+	}
+	return &object.String{Value: "proxy:" + urlObj.Value}
+}
+
+func (e *Engine) BuiltinStatic(args ...object.Object) object.Object {
+	if len(args) != 1 {
+		return &object.Error{Message: "http.static requires 1 argument"}
+	}
+	pathObj, ok := args[0].(*object.String)
+	if !ok {
+		return &object.Error{Message: "http.static argument must be string"}
+	}
+	return &object.String{Value: "static:" + pathObj.Value}
+}
+
+func (e *Engine) Start(devMode bool) error {
 	var domains []string
-	for _, srv := range s.program.Servers {
-		domains = append(domains, srv.Domain)
+	for dom := range e.servers {
+		domains = append(domains, dom)
 	}
 
 	certManager := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist(domains...),
-		Cache:      autocert.DirCache("certs"), // Speichert Zertifikate im Ordner 'certs'
+		Cache:      autocert.DirCache("certs"),
 	}
 
-	// Create custom handler
-	handler := &routerHandler{program: s.program}
+	handler := &routerHandler{engine: e}
 
 	if devMode {
 		log.Println("Starting in Dev mode (HTTP) on port 8080...")
 		return http.ListenAndServe(":8080", handler)
 	}
 
-	// Production Mode: HTTPS with automatic Let's Encrypt certificates
 	server := &http.Server{
 		Addr:    ":443",
 		Handler: handler,
@@ -54,75 +159,62 @@ func (s *WebScriptServer) Start(devMode bool) error {
 
 	log.Printf("Starting WebScript Server on port 80 and 443 for %v...\n", domains)
 
-	// Start HTTP server that redirects to HTTPS and handles ACME challenges
 	go func() {
 		log.Fatal(http.ListenAndServe(":80", certManager.HTTPHandler(nil)))
 	}()
 
-	// Start HTTPS server
 	return server.ListenAndServeTLS("", "")
 }
 
 type routerHandler struct {
-	program *ast.Program
+	engine *Engine
 }
 
 func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Find matching server by domain
-	var matchedServer *ast.Server
-	for _, srv := range h.program.Servers {
-		// Clean the host in case it contains port (e.g., localhost:8080)
-		host := r.Host
-		if strings.Contains(host, ":") {
-			host = strings.Split(host, ":")[0]
-		}
-
-		if srv.Domain == host {
-			matchedServer = srv
-			break
-		}
+	host := r.Host
+	if strings.Contains(host, ":") {
+		host = strings.Split(host, ":")[0]
 	}
 
-	if matchedServer == nil {
+	srv, ok := h.engine.servers[host]
+	if !ok {
 		http.Error(w, "Domain not configured in WebScript", http.StatusNotFound)
 		return
 	}
 
-	// Find matching route
-	// Note: We need a smarter matching if "/*" vs specific routes exist.
-	// For simplicity, we check specific routes first, then wildcards.
-	var matchedRoute *ast.Route
+	var matchedTarget *RouteTarget
+	var matchedPath string
 
-	// Exact match first
-	for _, route := range matchedServer.Routes {
-		if route.Path == r.URL.Path {
-			matchedRoute = route
+	for path, target := range srv.Routes {
+		if path == r.URL.Path {
+			matchedTarget = &target
+			matchedPath = path
 			break
 		}
 	}
 
-	// Wildcard match (simple implementation)
-	if matchedRoute == nil {
-		for _, route := range matchedServer.Routes {
-			if strings.HasSuffix(route.Path, "/*") {
-				prefix := strings.TrimSuffix(route.Path, "/*")
+	if matchedTarget == nil {
+		for path, target := range srv.Routes {
+			if strings.HasSuffix(path, "/*") {
+				prefix := strings.TrimSuffix(path, "/*")
 				if strings.HasPrefix(r.URL.Path, prefix) {
-					matchedRoute = route
+					t := target
+					matchedTarget = &t
+					matchedPath = path
 					break
 				}
 			}
 		}
 	}
 
-	if matchedRoute == nil {
+	if matchedTarget == nil {
 		http.Error(w, "Path not found", http.StatusNotFound)
 		return
 	}
 
-	// Handle the target
-	switch matchedRoute.Target.Type {
-	case ast.TargetProxy:
-		targetURLStr := matchedRoute.Target.Value
+	switch matchedTarget.Type {
+	case "proxy":
+		targetURLStr := matchedTarget.Value
 		if !strings.HasPrefix(targetURLStr, "http://") && !strings.HasPrefix(targetURLStr, "https://") {
 			targetURLStr = "http://" + targetURLStr
 		}
@@ -132,25 +224,34 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		proxy := httputil.NewSingleHostReverseProxy(targetUrl)
-		
-		// Update headers for proxying
 		r.URL.Host = targetUrl.Host
 		r.URL.Scheme = targetUrl.Scheme
 		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
 		r.Host = targetUrl.Host
-
 		proxy.ServeHTTP(w, r)
 
-	case ast.TargetStatic:
-		folderPath := matchedRoute.Target.Value
-		
-		// If path is "/*", we serve directly from folder
-		// If path is "/images/*", we need to strip "/images" before looking up in folder
-		prefix := strings.TrimSuffix(matchedRoute.Path, "/*")
-		
+	case "static":
+		folderPath := matchedTarget.Value
+		prefix := strings.TrimSuffix(matchedPath, "/*")
 		fs := http.StripPrefix(prefix, http.FileServer(http.Dir(folderPath)))
 		fs.ServeHTTP(w, r)
-	default:
-		http.Error(w, "Unknown target type", http.StatusInternalServerError)
+
+	case "function":
+		reqObj := &object.String{Value: "Request to " + r.URL.Path}
+		
+		// Create a local scope for the function execution
+		env := object.NewEnclosedEnvironment(matchedTarget.Action.Env)
+		if len(matchedTarget.Action.Parameters) > 0 {
+			env.Set(matchedTarget.Action.Parameters[0].Value, reqObj)
+		}
+
+		result := evaluator.Eval(matchedTarget.Action.Body, env)
+		if result != nil {
+			if result.Type() == object.STRING_OBJ {
+				w.Write([]byte(result.(*object.String).Value))
+			} else {
+				w.Write([]byte(result.Inspect()))
+			}
+		}
 	}
 }

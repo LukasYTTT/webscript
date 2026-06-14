@@ -32,14 +32,10 @@ func (l *Lexer) NextToken() token.Token {
 	l.skipComment()
 
 	switch l.ch {
-	case '-':
-		if l.peekChar() == '>' {
-			ch := l.ch
-			l.readChar()
-			tok = token.Token{Type: token.ARROW, Literal: string(ch) + string(l.ch)}
-		} else {
-			tok = newToken(token.ILLEGAL, l.ch)
-		}
+	case '=':
+		tok = newToken(token.ASSIGN, l.ch)
+	case '+':
+		tok = newToken(token.PLUS, l.ch)
 	case '.':
 		tok = newToken(token.DOT, l.ch)
 	case ',':

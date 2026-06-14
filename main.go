@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"webscript/evaluator"
 	"webscript/lexer"
+	"webscript/object"
 	"webscript/parser"
 	"webscript/server"
 )
@@ -137,8 +139,22 @@ func handleRun(filename string, devMode bool) {
 		os.Exit(1)
 	}
 
-	srv := server.New(program)
-	if err := srv.Start(devMode); err != nil {
+	engine := server.NewEngine()
+	env := object.NewEnvironment()
+
+	// Inject the standard library builtins
+	env.Set("import", &object.Builtin{Fn: func(args ...object.Object) object.Object { return evaluator.NULL }})
+	env.Set("http.server", &object.Builtin{Fn: engine.BuiltinServer})
+	env.Set("http.route", &object.Builtin{Fn: engine.BuiltinRoute})
+	env.Set("http.proxy", &object.Builtin{Fn: engine.BuiltinProxy})
+	env.Set("http.static", &object.Builtin{Fn: engine.BuiltinStatic})
+
+	evaluated := evaluator.Eval(program, env)
+	if evaluated != nil && evaluated.Type() == object.ERROR_OBJ {
+		log.Fatalf("Runtime Error: %s\n", evaluated.Inspect())
+	}
+
+	if err := engine.Start(devMode); err != nil {
 		log.Fatalf("Server Error: %v\n", err)
 	}
 }

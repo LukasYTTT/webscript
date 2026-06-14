@@ -15,9 +15,10 @@ const (
 	STRING = "STRING"
 
 	// Operators
-	DOT   = "."
-	COMMA = ","
-	ARROW = "->"
+	ASSIGN = "="
+	PLUS   = "+"
+	DOT    = "."
+	COMMA  = ","
 
 	// Delimiters
 	LBRACE = "{"
@@ -27,16 +28,12 @@ const (
 
 	// Keywords
 	IMPORT = "IMPORT"
-	
-	// Legacy Keywords (can be phased out or kept for backwards compatibility)
-	SERVER = "SERVER"
-	ROUTE  = "ROUTE"
-	PROXY  = "PROXY"
-	STATIC = "STATIC"
+	FUNC   = "FUNC"
 )
 
 var keywords = map[string]TokenType{
 	"import": IMPORT,
+	"func":   FUNC,
 }
 
 func LookupIdent(ident string) TokenType {
