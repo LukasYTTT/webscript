@@ -21,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "6.0.7"
+const Version = "6.0.8"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
@@ -360,15 +360,18 @@ func handleInstallAll() {
 	var config WebScriptConfig
 	json.Unmarshal(data, &config)
 
-	for pkg, url := range config.Dependencies {
-		fmt.Printf("Installing %s from %s...\n", pkg, url)
-		installGitRepo(pkg, url)
+	for pkg, _ := range config.Dependencies {
+		fmt.Printf("Installing %s...\n", pkg)
+		installPackage(pkg)
 	}
 }
 
-func handleInstall(repoURL string) {
-	pkgName := filepath.Base(repoURL)
-	installGitRepo(pkgName, "https://"+repoURL)
+func handleInstall(pkgName string) {
+	err := installPackage(pkgName)
+	if err != nil {
+		fmt.Printf("Error installing '%s': %v\n", pkgName, err)
+		return
+	}
 
 	data, err := ioutil.ReadFile("webscript.json")
 	var config WebScriptConfig
@@ -378,21 +381,35 @@ func handleInstall(repoURL string) {
 		config.Dependencies = make(map[string]string)
 	}
 	
-	config.Dependencies[pkgName] = "https://" + repoURL
+	config.Dependencies[pkgName] = "https://wbswiki.lukasyt.de/packages/" + pkgName
 	data, _ = json.MarshalIndent(config, "", "  ")
 	ioutil.WriteFile("webscript.json", data, 0644)
 	
 	fmt.Printf("Library '%s' installed!\n", pkgName)
 }
 
-func installGitRepo(pkgName, url string) {
+func installPackage(pkgName string) error {
 	targetDir := filepath.Join("wbs_modules", pkgName)
-	os.RemoveAll(targetDir)
-	cmd := exec.Command("git", "clone", url, targetDir)
-	err := cmd.Run()
+	os.MkdirAll(targetDir, 0755)
+	
+	url := fmt.Sprintf("https://wbswiki.lukasyt.de/packages/%s/index.ws", pkgName)
+	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("Warning: Could not clone repository %s. (Do you have git installed?)\n", url)
+		return fmt.Errorf("failed to connect: %v", err)
 	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("package not found at %s (Status: %d)", url, resp.StatusCode)
+	}
+
+	content, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %v", err)
+	}
+
+	targetFile := filepath.Join(targetDir, "index.ws")
+	return ioutil.WriteFile(targetFile, content, 0644)
 }
 
 func handleRun(targetPath string, devMode bool, testMode bool) {

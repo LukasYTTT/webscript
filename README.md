@@ -93,8 +93,8 @@ wbs run /etc/wbs/confs/ --dev
 ---
 
 ## 📚 Custom Packages & Wiki
-You can install libraries from GitHub:
 ```bash
-wbs install github.com/username/awesome-library
+wbs install logger
 ```
-Want to build your own WebScript packages? **[Check out our official Wiki in the `/docs` folder!](./docs/index.md)**
+Want to build your own WebScript packages or learn how it works under the hood? 
+**[Check out our Official Wiki!](https://wbswiki.lukasyt.de)**

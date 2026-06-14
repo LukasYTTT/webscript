@@ -1,22 +1,25 @@
 # 📦 Building Custom WebScript Packages
 
-WebScript is not just a configuration file format—it's a complete Domain-Specific Language (DSL). This means you can write reusable logic and share it with the world via GitHub.
+WebScript is not just a configuration file format—it's a complete Domain-Specific Language (DSL). This means you can write reusable logic and share it with the world via the official WebScript Mono-Repo.
 
 ---
 
 ## 1. How the Package System Works
-Whenever you define a variable or a function in the root scope of your `.ws` file, it is **automatically exported**. When someone imports your package, WebScript converts your GitHub repository name into an object that contains all your exported functions.
+Whenever you define a variable or a function in the root scope of your `.ws` file, it is **automatically exported**. When someone imports your package via `wbs install <package>`, WebScript downloads your code and converts your package name into an object that contains all your exported functions.
 
-## 2. Creating Your Package
+## 2. Publishing Your Package
 
-### Step 1: Initialize a Git Repository
-Create a new folder and initialize Git. Let's assume you will publish it to `github.com/YourName/wbs-logger`.
+To ensure all packages are safe and centralized, WebScript uses an official Mono-Repo architecture. All packages live inside the official `LukasYTTT/webscript-packages` repository on GitHub.
 
-### Step 2: Write your Code (`index.ws`)
-The entry point of your package must be named `index.ws`.
+### Step 1: Fork the Official Repository
+Go to [github.com/LukasYTTT/webscript-packages](https://github.com/LukasYTTT/webscript-packages) and fork the repository to your own GitHub account.
+
+### Step 2: Create Your Package Folder
+Inside your forked repository, create a new folder with the name of your package (e.g., `logger`). 
+The entry point of your package inside this folder **must** be named `index.ws`.
 
 ```webscript
-# index.ws
+# logger/index.ws
 
 # Exported Variable
 let defaultPrefix = "[INFO]"
@@ -27,13 +30,8 @@ let logRequest = fn(domain, path) {
 }
 ```
 
-### Step 3: Publish to GitHub
-Commit your code and push it to a public GitHub repository.
-```bash
-git add index.ws
-git commit -m "First release of my logger"
-git push origin main
-```
+### Step 3: Submit a Pull Request
+Commit your new folder to your fork and open a **Pull Request** to the original `LukasYTTT/webscript-packages` repository. Once the repository maintainers review and merge your Pull Request, your package becomes officially available to everyone!
 
 ---
 
@@ -41,12 +39,13 @@ git push origin main
 
 Any WebScript user can open their terminal and type:
 ```bash
-wbs install github.com/YourName/wbs-logger
+wbs install logger
 ```
 
 **What happens in the background?**
-1. WebScript clones your repository into their `wbs_modules/` folder.
-2. It adds your repository to their `webscript.json` dependency tracker.
+1. WebScript connects to the official repository and downloads ONLY your `logger` folder.
+2. It places your code into the user's `wbs_modules/logger/` directory.
+3. It adds your package to their `webscript.json` dependency tracker.
 
 ---
 
@@ -55,17 +54,16 @@ wbs install github.com/YourName/wbs-logger
 Users can now import your library in their `config.ws`.
 
 > [!NOTE]
-> WebScript automatically replaces slashes `/` and dashes `-` in your repository URL with underscores `_` to create a valid variable name.
-> `github.com/YourName/wbs-logger` becomes `github_com_YourName_wbs_logger`.
+> WebScript uses the package name (the name of your folder) as the variable name. Slashes and dashes are replaced with underscores.
 
 ```webscript
 # Import the package
-import "github.com/YourName/wbs-logger"
+import "logger"
 
 http.server("example.com") {
     
     # Call the function from your package!
-    github_com_YourName_wbs_logger.logRequest("example.com", "/*")
+    logger.logRequest("example.com", "/*")
 
     http.route("/*", http.static("/var/www/html"))
 }
@@ -74,4 +72,4 @@ http.server("example.com") {
 ## 💡 Best Practices
 1. **Always name your main file `index.ws`**: WebScript looks for this file when importing a directory.
 2. **Keep it stateless**: WebScript configurations are evaluated once at startup. Avoid using global state variables that change during runtime unless you explicitly understand the evaluator's memory model.
-3. **Write a README**: Always include a `README.md` in your GitHub repository so others know what functions you have exported!
+3. **Write a README**: Always include a `README.md` inside your package folder so others know what functions you have exported!
