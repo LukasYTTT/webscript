@@ -23,8 +23,13 @@ cd webscript
 makepkg -si
 ```
 *(This will soon be available directly via `yay -S webscript`!)*
+### Arch Linux (AUR)
+If you are using Arch Linux, you can easily install WebScript via the AUR using `yay`:
+```bash
+yay -S webscript-git
+```
 
-### For Everyone Else (Linux / macOS / Windows)
+### Manual Installation (All Linux)
 You need [Go](https://golang.org/) installed on your system.
 
 ```bash
