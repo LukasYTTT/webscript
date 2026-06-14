@@ -14,6 +14,13 @@ Additionally, WebScript **automatically handles HTTPS certificates** (Let's Encr
 
 ## 📦 Installation
 
+### 🚀 Universal Install (Linux & macOS)
+The absolute easiest way to install WebScript anywhere is via our automated installation script. Just open your terminal and run:
+```bash
+curl -sSL https://raw.githubusercontent.com/LukasYTTT/webscript/main/install.sh | bash
+```
+*(Requires Go and Git to be installed)*
+
 ### For Arch Linux Users (via AUR)
 You can easily install WebScript using the Arch User Repository (AUR):
 
