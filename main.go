@@ -190,6 +190,14 @@ func handleCreate() {
 		domain = "localhost"
 	}
 
+	fmt.Print("Port (leave empty for 80/443, e.g. 8080 for local testing): ")
+	portInput, _ := reader.ReadString('\n')
+	portInput = strings.TrimSpace(portInput)
+	portInput = regexp.MustCompile(`[^0-9]`).ReplaceAllString(portInput, "")
+	if portInput != "" && !strings.Contains(domain, ":") {
+		domain = fmt.Sprintf("%s:%s", domain, portInput)
+	}
+
 	fmt.Print("Static Folder Path (e.g. /var/www/html or ./public): ")
 	staticPath, _ := reader.ReadString('\n')
 	staticPath = strings.TrimSpace(staticPath)
@@ -239,6 +247,31 @@ func handleCreate() {
 
 	fmt.Printf("\n✅ Configuration successfully generated at: %s\n", targetPath)
 	fmt.Printf("Run 'wbs -t /etc/wbs/confs' to verify it, or 'sudo systemctl restart wbs' to apply.\n")
+
+	if !strings.Contains(domain, "localhost") && !strings.Contains(domain, "127.0.0.1") && !strings.Contains(domain, ":") {
+		fmt.Println("\n🌐 Fetching Server IP...")
+		client := http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Get("https://ifconfig.me")
+		var ip string
+		if err == nil {
+			defer resp.Body.Close()
+			body, _ := ioutil.ReadAll(resp.Body)
+			ip = strings.TrimSpace(string(body))
+		} else {
+			ip = "<YOUR-SERVER-IP>"
+		}
+		
+		fmt.Println("\n============================================================")
+		fmt.Println("⚠️  WICHTIG: DNS-EINTRAG SETZEN")
+		fmt.Println("============================================================")
+		fmt.Printf("Damit das automatische HTTPS funktioniert, musst du bei deinem\n")
+		fmt.Printf("Domain-Anbieter einen A-Record erstellen:\n\n")
+		fmt.Printf("   Name: %s\n", domain)
+		fmt.Printf("   Ziel (IPv4): %s\n\n", ip)
+		fmt.Printf("Sobald der Eintrag aktiv ist, holt WebScript vollautomatisch\n")
+		fmt.Printf("dein Let's Encrypt HTTPS-Zertifikat!\n")
+		fmt.Println("============================================================")
+	}
 }
 
 func handleInstallAll() {
