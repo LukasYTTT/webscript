@@ -1,6 +1,6 @@
 # Maintainer: Lukas <lukas@example.com>
 pkgname=webscript-git
-pkgver=r8.37a343e
+pkgver=r9.5582503
 pkgrel=1
 pkgdesc="A high-performance reverse proxy and web server language"
 arch=('x86_64')
