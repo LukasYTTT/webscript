@@ -338,8 +338,11 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		srv, ok = h.engine.servers[hostWithoutPort]
 		if !ok {
-			http.Error(w, "Domain not configured in WebScript", http.StatusNotFound)
-			return
+			srv, ok = h.engine.servers["default"]
+			if !ok {
+				http.Error(w, "Domain not configured in WebScript", http.StatusNotFound)
+				return
+			}
 		}
 	}
 

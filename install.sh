@@ -59,8 +59,29 @@ if [ "$EUID" -ne 0 ]; then
     sudo install -Dm755 wbs /usr/local/bin/wbs
     sudo ln -sf /usr/local/bin/wbs /usr/local/bin/webscript
 else
-    install -Dm755 wbs /usr/local/bin/wbs
-    ln -sf /usr/local/bin/wbs /usr/local/bin/webscript
+	install -Dm755 wbs /usr/local/bin/wbs
+	ln -sf /usr/local/bin/wbs /usr/local/bin/webscript
+fi
+
+echo "-> Installing default configurations..."
+if [ "$EUID" -ne 0 ]; then
+    sudo mkdir -p /etc/wbs/confs
+    sudo mkdir -p /var/www/html
+    if [ ! -f /etc/wbs/confs/default.ws ]; then
+        sudo cp public/default.ws /etc/wbs/confs/default.ws
+    fi
+    if [ ! -f /var/www/html/index.html ]; then
+        sudo cp public/index.html /var/www/html/index.html
+    fi
+else
+    mkdir -p /etc/wbs/confs
+    mkdir -p /var/www/html
+    if [ ! -f /etc/wbs/confs/default.ws ]; then
+        cp public/default.ws /etc/wbs/confs/default.ws
+    fi
+    if [ ! -f /var/www/html/index.html ]; then
+        cp public/index.html /var/www/html/index.html
+    fi
 fi
 
 echo "-> Cleaning up..."

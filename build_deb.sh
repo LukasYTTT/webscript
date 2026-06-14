@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="5.0.1"
+VERSION="6.0.1"
 ARCH="amd64"
 PKG_NAME="webscript_${VERSION}_${ARCH}"
 

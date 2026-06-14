@@ -21,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "6.0.0"
+const Version = "6.0.1"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
@@ -159,9 +159,16 @@ WantedBy=multi-user.target
 	os.MkdirAll("/etc/wbs/confs", 0755)
 	
 	if _, err := os.Stat("/etc/wbs/confs/default.ws"); os.IsNotExist(err) {
-		defaultConf := "import \"std/http\"\n\nhttp.server(\"localhost\") {\n    http.route(\"/*\", http.static(\"/var/www/html\"))\n}\n"
+		defaultConf := "import \"std/http\"\n\nhttp.server(\"default\") {\n    http.route(\"/*\", http.static(\"/var/www/html\"))\n}\n"
 		ioutil.WriteFile("/etc/wbs/confs/default.ws", []byte(defaultConf), 0644)
 		fmt.Println("Created default config at /etc/wbs/confs/default.ws")
+	}
+
+	os.MkdirAll("/var/www/html", 0755)
+	if _, err := os.Stat("/var/www/html/index.html"); os.IsNotExist(err) {
+		defaultHtml := "<!DOCTYPE html>\n<html>\n<head>\n<title>WebScript Test</title>\n<style>\n  body { font-family: sans-serif; text-align: center; margin-top: 50px; background: #222; color: #fff; }\n  h1 { color: #00d2ff; }\n</style>\n</head>\n<body>\n  <h1>Welcome to WebScript!</h1>\n  <p>This is a static website, served extremely fast by WebScript, completely without Nginx!</p>\n</body>\n</html>\n"
+		ioutil.WriteFile("/var/www/html/index.html", []byte(defaultHtml), 0644)
+		fmt.Println("Created default HTML at /var/www/html/index.html")
 	}
 
 	err := ioutil.WriteFile("/etc/systemd/system/wbs.service", []byte(serviceContent), 0644)
