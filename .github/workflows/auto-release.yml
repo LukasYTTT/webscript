@@ -1,0 +1,45 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Version
+        id: get_version
+        run: |
+          VERSION=$(grep -oP 'const Version = "\K[^"]+' main.go)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Found version: $VERSION"
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git ls-remote --tags origin refs/tags/v${{ env.VERSION }} | grep -q "refs/tags/v${{ env.VERSION }}"; then
+            echo "Tag v${{ env.VERSION }} already exists. Skipping release."
+            echo "skip=true" >> $GITHUB_ENV
+          else
+            echo "skip=false" >> $GITHUB_ENV
+          fi
+
+      - name: Create Release
+        if: env.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: WebScript v${{ env.VERSION }}
+          body: "Automated release for WebScript version v${{ env.VERSION }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
