@@ -248,7 +248,14 @@ func handleCreate() {
 	fmt.Printf("\n✅ Configuration successfully generated at: %s\n", targetPath)
 	fmt.Printf("Run 'wbs -t /etc/wbs/confs' to verify it, or 'sudo systemctl restart wbs' to apply.\n")
 
-	if !strings.Contains(domain, "localhost") && !strings.Contains(domain, "127.0.0.1") && !strings.Contains(domain, ":") {
+	baseDomain := domain
+	if strings.Contains(baseDomain, ":") {
+		baseDomain = strings.Split(baseDomain, ":")[0]
+	}
+
+	isLocal := baseDomain == "localhost" || baseDomain == "127.0.0.1" || strings.HasSuffix(baseDomain, ".localhost") || strings.HasSuffix(baseDomain, ".local")
+
+	if !isLocal {
 		fmt.Println("\n🌐 Fetching Server IP...")
 		client := http.Client{Timeout: 3 * time.Second}
 		resp, err := client.Get("https://ifconfig.me")
