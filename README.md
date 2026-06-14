@@ -29,6 +29,16 @@ If you are using Arch Linux, you can easily install WebScript via the AUR using 
 yay -S webscript-git
 ```
 
+### Debian / Ubuntu
+For Debian or Ubuntu, you can build a standard `.deb` package to easily install and manage WebScript using `apt`:
+```bash
+git clone https://github.com/LukasYTTT/webscript.git
+cd webscript
+chmod +x build_deb.sh
+./build_deb.sh
+sudo apt install ./webscript_1.0.0_amd64.deb
+```
+
 ### Manual Installation (All Linux)
 You need [Go](https://golang.org/) installed on your system.
 
