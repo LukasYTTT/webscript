@@ -2,29 +2,33 @@
 pkgname=webscript-git
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="A high-performance reverse proxy and web server language with its own package manager"
+pkgdesc="A high-performance reverse proxy and web server language"
 arch=('x86_64')
-url="https://github.com/yourusername/webscript"
+url="https://github.com/LukasYTTT/webscript"
 license=('MIT')
-depends=('glibc')
-makedepends=('go')
+makedepends=('go' 'git')
 provides=('webscript' 'wbs')
 conflicts=('webscript')
-# For a real AUR package, source would be a git URL. Here we use local files for testing.
-source=()
-md5sums=()
+source=("git+https://github.com/LukasYTTT/webscript.git")
+md5sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/${pkgname%-git}"
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
 
 build() {
-  # In a real PKGBUILD, we would cd into the downloaded src dir.
-  # cd "$srcdir/$pkgname"
-  
-  # For local testing, assuming the PKGBUILD is in the project root:
+  cd "$srcdir/${pkgname%-git}"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export GOFLAGS="-buildmode=pie -trimpath -extldflags ${LDFLAGS}"
   go build -o wbs .
 }
 
 package() {
-  # Install the executable to /usr/bin/wbs
+  cd "$srcdir/${pkgname%-git}"
   install -Dm755 wbs "$pkgdir/usr/bin/wbs"
-  # Optional: symlink webscript to wbs
   ln -s /usr/bin/wbs "$pkgdir/usr/bin/webscript"
 }
