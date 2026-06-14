@@ -19,6 +19,7 @@ WebScript is designed to make configuring web servers as simple as writing a bas
 - **[CLI Reference](#cli-reference)** (Overview of all `wbs` commands)
 
 ### 2. Developer Guides
+- **[Server Architecture](./architecture.md)** (How WebScript works under the hood on a production server)
 - **[Building Custom Packages](./custom_packages.md)** (How to build and publish your own WebScript libraries)
 
 ---

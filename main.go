@@ -21,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "6.0.6"
+const Version = "6.0.7"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
@@ -272,6 +272,47 @@ func handleCreate() {
 	if err != nil {
 		fmt.Printf("Error writing file: %v\n", err)
 		return
+	}
+
+	if proxyTarget == "" {
+		if _, err := os.Stat(staticPath); os.IsNotExist(err) {
+			os.MkdirAll(staticPath, 0755)
+		}
+		
+		targetIndex := indexFileInput
+		if targetIndex == "" {
+			if enablePhp {
+				targetIndex = "index.php"
+			} else {
+				targetIndex = "index.html"
+			}
+		}
+		
+		indexPath := filepath.Join(staticPath, targetIndex)
+		if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+			defaultHtml := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to WebScript</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; color: #333; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
+        h1 { color: #007bff; font-size: 3rem; margin-bottom: 10px; }
+        p { font-size: 1.2rem; color: #555; max-width: 600px; }
+        .code { background-color: #282c34; color: #61dafb; padding: 15px; border-radius: 8px; margin-top: 20px; font-family: monospace; font-size: 1.1rem; }
+    </style>
+</head>
+<body>
+    <h1>Welcome to WebScript! 🚀</h1>
+    <p>Your static web server is successfully running.</p>
+    <p>To change this page, edit the following file on your server:</p>
+    <div class="code">` + indexPath + `</div>
+</body>
+</html>`
+			ioutil.WriteFile(indexPath, []byte(defaultHtml), 0644)
+			fmt.Printf("\n✨ Created default index file at: %s\n", indexPath)
+		}
 	}
 
 	fmt.Printf("\n✅ Configuration successfully generated at: %s\n", targetPath)

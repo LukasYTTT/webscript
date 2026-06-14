@@ -1,0 +1,5 @@
+Package: webscript
+Version: 1.0.0
+Architecture: amd64
+Maintainer: Lukas <lukas@example.com>
+Description: A high-performance reverse proxy and web server language
