@@ -50,6 +50,10 @@ func NewEngine() *Engine {
 	}
 }
 
+func (e *Engine) GetServers() map[string]*ServerConfig {
+	return e.servers
+}
+
 // Builtin: http.secure_ip()
 func (e *Engine) BuiltinSecureIp(args ...object.Object) object.Object {
 	e.SecureIP = true
@@ -109,8 +113,14 @@ func (e *Engine) BuiltinRoute(args ...object.Object) object.Object {
 			target.Type = "proxy"
 			target.Value = strings.TrimPrefix(val, "proxy:")
 		} else if strings.HasPrefix(val, "static:") {
+			parts := strings.SplitN(strings.TrimPrefix(val, "static:"), "|", 2)
 			target.Type = "static"
-			target.Value = strings.TrimPrefix(val, "static:")
+			target.Value = parts[0]
+			if len(parts) > 1 {
+				target.IndexFile = parts[1]
+			} else {
+				target.IndexFile = "index.html"
+			}
 		} else if strings.HasPrefix(val, "php:") {
 			parts := strings.SplitN(strings.TrimPrefix(val, "php:"), "|", 2)
 			target.Type = "php"
@@ -146,14 +156,20 @@ func (e *Engine) BuiltinProxy(args ...object.Object) object.Object {
 }
 
 func (e *Engine) BuiltinStatic(args ...object.Object) object.Object {
-	if len(args) != 1 {
-		return &object.Error{Message: "http.static requires 1 argument"}
+	if len(args) < 1 {
+		return &object.Error{Message: "http.static requires at least 1 argument"}
 	}
 	pathObj, ok := args[0].(*object.String)
 	if !ok {
-		return &object.Error{Message: "http.static argument must be string"}
+		return &object.Error{Message: "http.static first argument must be string"}
 	}
-	return &object.String{Value: "static:" + pathObj.Value}
+	indexFile := "index.html"
+	if len(args) == 2 {
+		if idxObj, ok := args[1].(*object.String); ok {
+			indexFile = idxObj.Value
+		}
+	}
+	return &object.String{Value: "static:" + pathObj.Value + "|" + indexFile}
 }
 
 func (e *Engine) BuiltinPhp(args ...object.Object) object.Object {
@@ -378,6 +394,15 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "static":
 		folderPath := matchedTarget.Value
 		prefix := strings.TrimSuffix(matchedPath, "/*")
+		reqPath := strings.TrimPrefix(r.URL.Path, prefix)
+		
+		if (reqPath == "" || reqPath == "/") && matchedTarget.IndexFile != "" && matchedTarget.IndexFile != "index.html" {
+			reqPath = "/" + matchedTarget.IndexFile
+			fullFilePath := filepath.Join(folderPath, reqPath)
+			http.ServeFile(w, r, fullFilePath)
+			return
+		}
+
 		fs := http.StripPrefix(prefix, http.FileServer(http.Dir(folderPath)))
 		fs.ServeHTTP(w, r)
 		

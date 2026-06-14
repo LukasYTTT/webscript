@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "5.0.1"
+const Version = "6.0.0"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
@@ -69,6 +70,12 @@ func main() {
 			devMode = true
 		}
 		handleRun(filename, devMode, false)
+	case "dns":
+		if len(os.Args) < 3 || os.Args[2] == "list" {
+			handleDNS("/etc/wbs/confs")
+		} else {
+			handleDNS(os.Args[2])
+		}
 	case "version":
 		fmt.Printf("WebScript Version v%s\n", Version)
 		checkForUpdates()
@@ -110,6 +117,7 @@ func printUsage() {
 	fmt.Println("  wbs install               Installs all libraries listed in webscript.json")
 	fmt.Println("  wbs run <path> [--dev]    Executes a WebScript configuration file or folder")
 	fmt.Println("  wbs -t <path>             Tests the configuration syntax (like nginx -t)")
+	fmt.Println("  wbs dns [path|list]       Checks the DNS A-Records for all configured domains")
 	fmt.Println("  wbs service               Installs WebScript as a systemd service")
 	fmt.Println("  wbs version               Prints the current version")
 }
@@ -214,6 +222,10 @@ func handleCreate() {
 	proxyTarget, _ := reader.ReadString('\n')
 	proxyTarget = strings.TrimSpace(proxyTarget)
 
+	fmt.Print("Index File (leave empty for default index.html / index.php): ")
+	indexFileInput, _ := reader.ReadString('\n')
+	indexFileInput = strings.TrimSpace(indexFileInput)
+
 	var sb strings.Builder
 	sb.WriteString("import \"std/http\"\n\n")
 	sb.WriteString(fmt.Sprintf("http.server(\"%s\") {\n", domain))
@@ -221,9 +233,17 @@ func handleCreate() {
 	if proxyTarget != "" {
 		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.proxy(\"%s\"))\n", proxyTarget))
 	} else if enablePhp {
-		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.php(\"%s\"))\n", staticPath))
+		if indexFileInput != "" {
+			sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.php(\"%s\", \"%s\"))\n", staticPath, indexFileInput))
+		} else {
+			sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.php(\"%s\"))\n", staticPath))
+		}
 	} else {
-		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.static(\"%s\"))\n", staticPath))
+		if indexFileInput != "" {
+			sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.static(\"%s\", \"%s\"))\n", staticPath, indexFileInput))
+		} else {
+			sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.static(\"%s\"))\n", staticPath))
+		}
 	}
 	sb.WriteString("}\n")
 
@@ -274,7 +294,7 @@ func handleCreate() {
 		fmt.Println("============================================================")
 		fmt.Printf("Damit das automatische HTTPS funktioniert, musst du bei deinem\n")
 		fmt.Printf("Domain-Anbieter einen A-Record erstellen:\n\n")
-		fmt.Printf("   Name: %s\n", domain)
+		fmt.Printf("   Name: %s\n", baseDomain)
 		fmt.Printf("   Ziel (IPv4): %s\n\n", ip)
 		fmt.Printf("Sobald der Eintrag aktiv ist, holt WebScript vollautomatisch\n")
 		fmt.Printf("dein Let's Encrypt HTTPS-Zertifikat!\n")
@@ -391,4 +411,106 @@ func handleRun(targetPath string, devMode bool, testMode bool) {
 	if err := engine.Start(devMode); err != nil {
 		log.Fatalf("Server Error: %v\n", err)
 	}
+}
+
+func handleDNS(targetPath string) {
+	fmt.Println("🔍 WebScript DNS Checker")
+	fmt.Println("================================================================================")
+	
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("https://api.ipify.org")
+	var expectedIP string
+	if err == nil {
+		defer resp.Body.Close()
+		body, _ := ioutil.ReadAll(resp.Body)
+		expectedIP = strings.TrimSpace(string(body))
+	} else {
+		fmt.Println("❌ Could not fetch server IP. Are you offline?")
+		os.Exit(1)
+	}
+
+	engine := server.NewEngine()
+	env := object.NewEnvironment()
+
+	env.Set("import", &object.Builtin{Fn: func(args ...object.Object) object.Object { return evaluator.NULL }})
+	env.Set("http.server", &object.Builtin{Fn: engine.BuiltinServer})
+	env.Set("http.route", &object.Builtin{Fn: engine.BuiltinRoute})
+	env.Set("http.proxy", &object.Builtin{Fn: engine.BuiltinProxy})
+	env.Set("http.static", &object.Builtin{Fn: engine.BuiltinStatic})
+	env.Set("http.php", &object.Builtin{Fn: engine.BuiltinPhp})
+	env.Set("http.secure_ip", &object.Builtin{Fn: engine.BuiltinSecureIp})
+
+	var files []string
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		log.Fatalf("Error reading path: %v", err)
+	}
+
+	if info.IsDir() {
+		filepath.Walk(targetPath, func(path string, f os.FileInfo, err error) error {
+			if err == nil && !f.IsDir() && strings.HasSuffix(f.Name(), ".ws") {
+				files = append(files, path)
+			}
+			return nil
+		})
+	} else {
+		files = append(files, targetPath)
+	}
+
+	for _, file := range files {
+		content, err := ioutil.ReadFile(file)
+		if err == nil {
+			l := lexer.New(string(content))
+			p := parser.New(l)
+			program := p.ParseProgram()
+			if len(p.Errors()) == 0 {
+				evaluator.Eval(program, env)
+			}
+		}
+	}
+
+	servers := engine.GetServers()
+	if len(servers) == 0 {
+		fmt.Println("No domains configured in the specified files.")
+		return
+	}
+
+	fmt.Printf("%-25s %-18s %-18s %s\n", "Domain", "Expected IP", "Actual DNS IP", "Status")
+	fmt.Println("--------------------------------------------------------------------------------")
+
+	for dom := range servers {
+		baseDomain := dom
+		if strings.Contains(baseDomain, ":") {
+			baseDomain = strings.Split(baseDomain, ":")[0]
+		}
+
+		if baseDomain == "localhost" || baseDomain == "127.0.0.1" || strings.HasSuffix(baseDomain, ".localhost") || strings.HasSuffix(baseDomain, ".local") {
+			continue
+		}
+
+		ips, err := net.LookupIP(baseDomain)
+		actualIP := "<none>"
+		status := "❌ MISSING"
+
+		if err == nil && len(ips) > 0 {
+			for _, ip := range ips {
+				if ipv4 := ip.To4(); ipv4 != nil {
+					actualIP = ipv4.String()
+					break
+				}
+			}
+			if actualIP == "<none>" {
+				actualIP = ips[0].String() 
+			}
+		}
+
+		if actualIP == expectedIP {
+			status = "✅ OK"
+		} else if actualIP != "<none>" {
+			status = "❌ WRONG IP"
+		}
+
+		fmt.Printf("%-25s %-18s %-18s %s\n", baseDomain, expectedIP, actualIP, status)
+	}
+	fmt.Println("================================================================================")
 }
