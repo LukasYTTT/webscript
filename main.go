@@ -21,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "6.0.4"
+const Version = "6.0.5"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`

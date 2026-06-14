@@ -388,10 +388,23 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		proxy := httputil.NewSingleHostReverseProxy(targetUrl)
-		r.URL.Host = targetUrl.Host
-		r.URL.Scheme = targetUrl.Scheme
-		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
-		r.Host = targetUrl.Host
+		
+		reqPath := r.URL.Path
+		if strings.HasSuffix(matchedPath, "/*") {
+			prefix := strings.TrimSuffix(matchedPath, "/*")
+			reqPath = strings.TrimPrefix(r.URL.Path, prefix)
+		}
+		r.URL.Path = reqPath
+
+		// Wir behalten den originalen Host (r.Host)
+		// und fügen sinnvolle Proxy-Header hinzu
+		r.Header.Set("X-Forwarded-Host", r.Host)
+		if r.TLS != nil {
+			r.Header.Set("X-Forwarded-Proto", "https")
+		} else {
+			r.Header.Set("X-Forwarded-Proto", "http")
+		}
+
 		proxy.ServeHTTP(w, r)
 
 	case "static":
