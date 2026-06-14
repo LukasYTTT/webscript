@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"webscript/evaluator"
 	"webscript/lexer"
 	"webscript/object"
@@ -16,12 +19,15 @@ import (
 	"webscript/server"
 )
 
+const Version = "1.0.0"
+
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
 }
 
 func main() {
 	if len(os.Args) < 2 {
+		checkForUpdates()
 		printUsage()
 		os.Exit(1)
 	}
@@ -31,14 +37,20 @@ func main() {
 	switch command {
 	case "init":
 		handleInit()
+		checkForUpdates()
+	case "create":
+		handleCreate()
+		checkForUpdates()
 	case "service":
 		handleService()
+		checkForUpdates()
 	case "install":
 		if len(os.Args) < 3 {
 			handleInstallAll()
 		} else {
 			handleInstall(os.Args[2])
 		}
+		checkForUpdates()
 	case "-t":
 		if len(os.Args) < 3 {
 			fmt.Println("Please provide a file or folder: wbs -t /path/to/confs")
@@ -56,6 +68,9 @@ func main() {
 			devMode = true
 		}
 		handleRun(filename, devMode, false)
+	case "version":
+		fmt.Printf("WebScript Version v%s\n", Version)
+		checkForUpdates()
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -63,15 +78,39 @@ func main() {
 	}
 }
 
+func checkForUpdates() {
+	client := http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/LukasYTTT/webscript/releases/latest")
+	if err != nil {
+		return // Silently fail if offline or API is unreachable
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 200 {
+		var result struct {
+			TagName string `json:"tag_name"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err == nil {
+			if result.TagName != "" && result.TagName != "v"+Version {
+				fmt.Printf("\n\033[33m--- UPDATE AVAILABLE ---\033[0m\n")
+				fmt.Printf("A new version of WebScript (%s) is available! (Current: v%s)\n", result.TagName, Version)
+				fmt.Printf("Update with: curl -sSL https://raw.githubusercontent.com/LukasYTTT/webscript/main/install.sh | bash\n\n")
+			}
+		}
+	}
+}
+
 func printUsage() {
-	fmt.Println("WebScript (wbs) - Package Manager & Runtime")
+	fmt.Printf("WebScript (wbs) - Package Manager & Runtime (v%s)\n", Version)
 	fmt.Println("\nUsage:")
 	fmt.Println("  wbs init                  Creates a webscript.json")
+	fmt.Println("  wbs create                Interactively generate a new .ws config file")
 	fmt.Println("  wbs install <url>         Installs a library (e.g. github.com/user/lib)")
 	fmt.Println("  wbs install               Installs all libraries listed in webscript.json")
 	fmt.Println("  wbs run <path> [--dev]    Executes a WebScript configuration file or folder")
 	fmt.Println("  wbs -t <path>             Tests the configuration syntax (like nginx -t)")
 	fmt.Println("  wbs service               Installs WebScript as a systemd service")
+	fmt.Println("  wbs version               Prints the current version")
 }
 
 func handleInit() {
@@ -133,6 +172,67 @@ WantedBy=multi-user.target
 	fmt.Println("  sudo systemctl start wbs")
 	fmt.Println("  sudo systemctl restart wbs")
 	fmt.Println("  sudo systemctl status wbs")
+}
+
+func handleCreate() {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("🚀 WebScript Configuration Generator")
+	fmt.Println("------------------------------------")
+	
+	fmt.Print("Domain (e.g. example.com or localhost): ")
+	domain, _ := reader.ReadString('\n')
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		domain = "localhost"
+	}
+
+	fmt.Print("Static Folder Path (e.g. /var/www/html or ./public): ")
+	staticPath, _ := reader.ReadString('\n')
+	staticPath = strings.TrimSpace(staticPath)
+	if staticPath == "" {
+		staticPath = "/var/www/html"
+	}
+
+	fmt.Print("Enable PHP Support? (y/N): ")
+	phpInput, _ := reader.ReadString('\n')
+	phpInput = strings.TrimSpace(strings.ToLower(phpInput))
+	enablePhp := phpInput == "y" || phpInput == "yes"
+
+	fmt.Print("Reverse Proxy Target (leave empty if none, e.g. http://localhost:3000): ")
+	proxyTarget, _ := reader.ReadString('\n')
+	proxyTarget = strings.TrimSpace(proxyTarget)
+
+	var sb strings.Builder
+	sb.WriteString("import \"std/http\"\n\n")
+	sb.WriteString(fmt.Sprintf("http.server(\"%s\") {\n", domain))
+	
+	if proxyTarget != "" {
+		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.proxy(\"%s\"))\n", proxyTarget))
+	} else if enablePhp {
+		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.php(\"%s\"))\n", staticPath))
+	} else {
+		sb.WriteString(fmt.Sprintf("    http.route(\"/*\", http.static(\"%s\"))\n", staticPath))
+	}
+	sb.WriteString("}\n")
+
+	configStr := sb.String()
+	
+	targetPath := fmt.Sprintf("%s.ws", domain)
+	if os.Geteuid() == 0 {
+		if _, err := os.Stat("/etc/wbs/confs"); !os.IsNotExist(err) {
+			targetPath = fmt.Sprintf("/etc/wbs/confs/%s.ws", domain)
+		}
+	}
+
+	err := ioutil.WriteFile(targetPath, []byte(configStr), 0644)
+	if err != nil {
+		fmt.Printf("Error writing file: %v\n", err)
+		return
+	}
+
+	fmt.Printf("\n✅ Configuration successfully generated at: %s\n", targetPath)
+	fmt.Printf("Run 'wbs -t /etc/wbs/confs' to verify it, or 'sudo systemctl restart wbs' to apply.\n")
 }
 
 func handleInstallAll() {
