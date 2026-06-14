@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"webscript/evaluator"
@@ -183,6 +184,8 @@ func handleCreate() {
 	fmt.Print("Domain (e.g. example.com or localhost): ")
 	domain, _ := reader.ReadString('\n')
 	domain = strings.TrimSpace(domain)
+	// Remove hidden terminal escape characters
+	domain = regexp.MustCompile(`[^a-zA-Z0-9.\-_]`).ReplaceAllString(domain, "")
 	if domain == "" {
 		domain = "localhost"
 	}
