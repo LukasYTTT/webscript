@@ -60,46 +60,41 @@ sudo mv wbs /usr/local/bin/wbs
 
 ## 🛠 Usage
 
-### 1. Initialize a Project
-Create a new folder for your web configuration and run:
+### 1. Interactive Setup
+You no longer need to write configs by hand! Just use the interactive generator:
 ```bash
-wbs init
+sudo wbs create
 ```
-This creates a `webscript.json` file to track your dependencies.
+This will ask you for your domain, path, and proxy settings, and automatically generate a perfect configuration file in `/etc/wbs/confs/`.
 
-### 2. Write Configuration
-Create a `config.ws` file:
-
-```webscript
-import "std/http"
-
-# Example 1: Serve a static website
-http.server("mydomain.com") {
-    http.route("/*", http.static("./public"))
-}
-
-# Example 2: API Reverse Proxy
-http.server("api.mydomain.com") {
-    http.route("/*", http.proxy("localhost:3000"))
-}
+### 2. Start the System Service
+To start WebScript as a professional background daemon (like Nginx):
+```bash
+sudo wbs service
+sudo systemctl start wbs
 ```
 
-### 3. Start the Server
-To test locally without HTTPS (starts on port 8080):
+You can now manage it via systemctl:
+- `sudo systemctl restart wbs`
+- `sudo systemctl status wbs`
+
+### Syntax Checking
+To test if your configs are valid without restarting the server:
 ```bash
-wbs run config.ws --dev
+wbs -t /etc/wbs/confs/
 ```
 
-To run in production with **automatic HTTPS** (requires root privileges for ports 80 and 443):
+### Local Testing (Dev Mode)
+To test a config locally without HTTPS (starts on port 8080):
 ```bash
-sudo wbs run config.ws
+wbs run /etc/wbs/confs/ --dev
 ```
 
 ---
 
-## 📚 Installing Custom Packages
+## 📚 Custom Packages & Wiki
 You can install libraries from GitHub:
 ```bash
 wbs install github.com/username/awesome-library
 ```
-These will be downloaded into a `wbs_modules` folder and can be used via `import` in your script.
+Want to build your own WebScript packages? **[Check out our official Wiki in the `/docs` folder!](./docs/index.md)**
