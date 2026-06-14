@@ -1,9 +1,16 @@
 package server
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -12,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"webscript/evaluator"
 	"webscript/object"
 
@@ -167,8 +175,12 @@ func (e *Engine) BuiltinPhp(args ...object.Object) object.Object {
 
 func (e *Engine) Start(devMode bool) error {
 	var domains []string
+	var localDomains bool
 	for dom := range e.servers {
 		domains = append(domains, dom)
+		if dom == "localhost" || dom == "127.0.0.1" || strings.HasSuffix(dom, ".localhost") || strings.HasSuffix(dom, ".local") {
+			localDomains = true
+		}
 	}
 
 	certManager := &autocert.Manager{
@@ -187,18 +199,74 @@ func (e *Engine) Start(devMode bool) error {
 	server := &http.Server{
 		Addr:    ":443",
 		Handler: handler,
-		TLSConfig: &tls.Config{
-			GetCertificate: certManager.GetCertificate,
-		},
 	}
 
-	log.Printf("Starting WebScript Server on port 80 and 443 for %v...\n", domains)
+	if localDomains {
+		log.Println("Local domains detected. Generating self-signed HTTPS certificates...")
+		cert, err := generateDevCert(domains)
+		if err != nil {
+			return err
+		}
+		server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{*cert},
+		}
+	} else {
+		server.TLSConfig = &tls.Config{
+			GetCertificate: certManager.GetCertificate,
+		}
+		go func() {
+			log.Fatal(http.ListenAndServe(":80", certManager.HTTPHandler(nil)))
+		}()
+	}
 
-	go func() {
-		log.Fatal(http.ListenAndServe(":80", certManager.HTTPHandler(nil)))
-	}()
+	log.Printf("Starting WebScript Server on port 443 (HTTPS) for %v...\n", domains)
 
 	return server.ListenAndServeTLS("", "")
+}
+
+func generateDevCert(domains []string) (*tls.Certificate, error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"WebScript Dev"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              domains,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, err
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+
+	b, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return nil, err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: b})
+
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, err
+	}
+	return &cert, nil
 }
 
 type routerHandler struct {

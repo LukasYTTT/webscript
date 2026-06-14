@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"webscript/evaluator"
 	"webscript/lexer"
 	"webscript/object"
@@ -38,9 +39,15 @@ func main() {
 		} else {
 			handleInstall(os.Args[2])
 		}
+	case "-t":
+		if len(os.Args) < 3 {
+			fmt.Println("Please provide a file or folder: wbs -t /path/to/confs")
+			os.Exit(1)
+		}
+		handleRun(os.Args[2], false, true)
 	case "run":
 		if len(os.Args) < 3 {
-			fmt.Println("Please provide a file: wbs run config.ws")
+			fmt.Println("Please provide a file or folder: wbs run /path/to/confs")
 			os.Exit(1)
 		}
 		filename := os.Args[2]
@@ -48,7 +55,7 @@ func main() {
 		if len(os.Args) > 3 && os.Args[3] == "--dev" {
 			devMode = true
 		}
-		handleRun(filename, devMode)
+		handleRun(filename, devMode, false)
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
@@ -62,7 +69,8 @@ func printUsage() {
 	fmt.Println("  wbs init                  Creates a webscript.json")
 	fmt.Println("  wbs install <url>         Installs a library (e.g. github.com/user/lib)")
 	fmt.Println("  wbs install               Installs all libraries listed in webscript.json")
-	fmt.Println("  wbs run <file.ws> [--dev] Executes a WebScript configuration")
+	fmt.Println("  wbs run <path> [--dev]    Executes a WebScript configuration file or folder")
+	fmt.Println("  wbs -t <path>             Tests the configuration syntax (like nginx -t)")
 	fmt.Println("  wbs service               Installs WebScript as a systemd service")
 }
 
@@ -91,7 +99,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/wbs run /etc/wbs/config.ws
+ExecStart=/usr/bin/wbs run /etc/wbs/confs
 Restart=on-failure
 RestartSec=5
 
@@ -100,12 +108,12 @@ WantedBy=multi-user.target
 `
 	fmt.Println("Installing WebScript as a systemd service...")
 	
-	os.MkdirAll("/etc/wbs", 0755)
+	os.MkdirAll("/etc/wbs/confs", 0755)
 	
-	if _, err := os.Stat("/etc/wbs/config.ws"); os.IsNotExist(err) {
+	if _, err := os.Stat("/etc/wbs/confs/default.ws"); os.IsNotExist(err) {
 		defaultConf := "import \"std/http\"\n\nhttp.server(\"localhost\") {\n    http.route(\"/*\", http.static(\"/var/www/html\"))\n}\n"
-		ioutil.WriteFile("/etc/wbs/config.ws", []byte(defaultConf), 0644)
-		fmt.Println("Created default config at /etc/wbs/config.ws")
+		ioutil.WriteFile("/etc/wbs/confs/default.ws", []byte(defaultConf), 0644)
+		fmt.Println("Created default config at /etc/wbs/confs/default.ws")
 	}
 
 	err := ioutil.WriteFile("/etc/systemd/system/wbs.service", []byte(serviceContent), 0644)
@@ -113,7 +121,6 @@ WantedBy=multi-user.target
 		log.Fatalf("Failed to write service file: %v", err)
 	}
 
-	// Make sure wbs is in /usr/bin/wbs if we aren't there already
 	exePath, _ := os.Executable()
 	if exePath != "/usr/bin/wbs" && exePath != "/usr/local/bin/wbs" {
 		exec.Command("cp", exePath, "/usr/bin/wbs").Run()
@@ -144,7 +151,6 @@ func handleInstallAll() {
 
 func handleInstall(repoURL string) {
 	pkgName := filepath.Base(repoURL)
-	
 	installGitRepo(pkgName, "https://"+repoURL)
 
 	data, err := ioutil.ReadFile("webscript.json")
@@ -164,9 +170,7 @@ func handleInstall(repoURL string) {
 
 func installGitRepo(pkgName, url string) {
 	targetDir := filepath.Join("wbs_modules", pkgName)
-	
 	os.RemoveAll(targetDir)
-	
 	cmd := exec.Command("git", "clone", url, targetDir)
 	err := cmd.Run()
 	if err != nil {
@@ -174,24 +178,7 @@ func installGitRepo(pkgName, url string) {
 	}
 }
 
-func handleRun(filename string, devMode bool) {
-	content, err := ioutil.ReadFile(filename)
-	if err != nil {
-		log.Fatalf("Error reading file: %v\n", err)
-	}
-
-	l := lexer.New(string(content))
-	p := parser.New(l)
-	program := p.ParseProgram()
-
-	if len(p.Errors()) != 0 {
-		fmt.Println("Parser errors:")
-		for _, msg := range p.Errors() {
-			fmt.Printf("\t- %s\n", msg)
-		}
-		os.Exit(1)
-	}
-
+func handleRun(targetPath string, devMode bool, testMode bool) {
 	engine := server.NewEngine()
 	env := object.NewEnvironment()
 
@@ -204,9 +191,54 @@ func handleRun(filename string, devMode bool) {
 	env.Set("http.php", &object.Builtin{Fn: engine.BuiltinPhp})
 	env.Set("http.secure_ip", &object.Builtin{Fn: engine.BuiltinSecureIp})
 
-	evaluated := evaluator.Eval(program, env)
-	if evaluated != nil && evaluated.Type() == object.ERROR_OBJ {
-		log.Fatalf("Runtime Error: %s\n", evaluated.Inspect())
+	var files []string
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		log.Fatalf("Error reading path: %v", err)
+	}
+
+	if info.IsDir() {
+		filepath.Walk(targetPath, func(path string, f os.FileInfo, err error) error {
+			if err == nil && !f.IsDir() && strings.HasSuffix(f.Name(), ".ws") {
+				files = append(files, path)
+			}
+			return nil
+		})
+	} else {
+		files = append(files, targetPath)
+	}
+
+	if len(files) == 0 {
+		log.Fatalf("No .ws files found in %s", targetPath)
+	}
+
+	for _, file := range files {
+		content, err := ioutil.ReadFile(file)
+		if err != nil {
+			log.Fatalf("Error reading file %s: %v\n", file, err)
+		}
+
+		l := lexer.New(string(content))
+		p := parser.New(l)
+		program := p.ParseProgram()
+
+		if len(p.Errors()) != 0 {
+			fmt.Printf("Syntax errors in %s:\n", file)
+			for _, msg := range p.Errors() {
+				fmt.Printf("\t- %s\n", msg)
+			}
+			os.Exit(1)
+		}
+
+		evaluated := evaluator.Eval(program, env)
+		if evaluated != nil && evaluated.Type() == object.ERROR_OBJ {
+			log.Fatalf("Runtime Error in %s: %s\n", file, evaluated.Inspect())
+		}
+	}
+
+	if testMode {
+		fmt.Println("Syntax OK! All configuration files are valid.")
+		os.Exit(0)
 	}
 
 	if err := engine.Start(devMode); err != nil {

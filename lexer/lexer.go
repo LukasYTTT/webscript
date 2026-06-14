@@ -29,7 +29,6 @@ func (l *Lexer) NextToken() token.Token {
 	var tok token.Token
 
 	l.skipWhitespace()
-	l.skipComment()
 
 	switch l.ch {
 	case '=':
@@ -97,17 +96,16 @@ func isDigit(ch byte) bool {
 }
 
 func (l *Lexer) skipWhitespace() {
-	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
-		l.readChar()
-	}
-}
-
-func (l *Lexer) skipComment() {
-	if l.ch == '#' || (l.ch == '/' && l.peekChar() == '/') {
-		for l.ch != '\n' && l.ch != 0 {
+	for {
+		if l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
 			l.readChar()
+		} else if l.ch == '#' || (l.ch == '/' && l.peekChar() == '/') {
+			for l.ch != '\n' && l.ch != 0 {
+				l.readChar()
+			}
+		} else {
+			break
 		}
-		l.skipWhitespace()
 	}
 }
 
