@@ -409,11 +409,16 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Wir behalten den originalen Host (r.Host)
 		// und fügen sinnvolle Proxy-Header hinzu
 		r.Header.Set("X-Forwarded-Host", r.Host)
+
+		proto := "http"
 		if r.TLS != nil {
-			r.Header.Set("X-Forwarded-Proto", "https")
-		} else {
-			r.Header.Set("X-Forwarded-Proto", "http")
+			proto = "https"
+		} else if r.Header.Get("X-Forwarded-Proto") != "" {
+			proto = r.Header.Get("X-Forwarded-Proto")
+		} else if strings.Contains(r.Header.Get("CF-Visitor"), "\"scheme\":\"https\"") {
+			proto = "https"
 		}
+		r.Header.Set("X-Forwarded-Proto", proto)
 
 		proxy.ServeHTTP(w, r)
 

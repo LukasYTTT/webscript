@@ -21,7 +21,7 @@ import (
 	"webscript/server"
 )
 
-const Version = "6.0.9"
+const Version = "6.1.0"
 
 type WebScriptConfig struct {
 	Dependencies map[string]string `json:"dependencies"`
@@ -79,6 +79,8 @@ func main() {
 		} else {
 			handleDNS(os.Args[2])
 		}
+	case "logs":
+		handleLogs()
 	case "version":
 		fmt.Printf("WebScript Version v%s\n", Version)
 		checkForUpdates()
@@ -672,5 +674,16 @@ func handleDelete() {
 		fmt.Println("Please restart it manually: sudo systemctl restart wbs")
 	} else {
 		fmt.Println("Service restarted successfully. The domain is now offline.")
+	}
+}
+
+func handleLogs() {
+	fmt.Println("Tailing WebScript systemd logs... (Press Ctrl+C to stop)")
+	cmd := exec.Command("journalctl", "-u", "wbs", "-f")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		fmt.Printf("Failed to tail logs: %v\n", err)
 	}
 }
