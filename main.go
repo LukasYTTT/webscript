@@ -30,6 +30,8 @@ func main() {
 	switch command {
 	case "init":
 		handleInit()
+	case "service":
+		handleService()
 	case "install":
 		if len(os.Args) < 3 {
 			handleInstallAll()
@@ -61,6 +63,7 @@ func printUsage() {
 	fmt.Println("  wbs install <url>         Installs a library (e.g. github.com/user/lib)")
 	fmt.Println("  wbs install               Installs all libraries listed in webscript.json")
 	fmt.Println("  wbs run <file.ws> [--dev] Executes a WebScript configuration")
+	fmt.Println("  wbs service               Installs WebScript as a systemd service")
 }
 
 func handleInit() {
@@ -73,6 +76,56 @@ func handleInit() {
 		log.Fatalf("Error creating webscript.json: %v", err)
 	}
 	fmt.Println("webscript.json successfully created!")
+}
+
+func handleService() {
+	if os.Geteuid() != 0 {
+		fmt.Println("Please run this command as root (sudo wbs service)")
+		os.Exit(1)
+	}
+
+	serviceContent := `[Unit]
+Description=WebScript Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/wbs run /etc/wbs/config.ws
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+`
+	fmt.Println("Installing WebScript as a systemd service...")
+	
+	os.MkdirAll("/etc/wbs", 0755)
+	
+	if _, err := os.Stat("/etc/wbs/config.ws"); os.IsNotExist(err) {
+		defaultConf := "import \"std/http\"\n\nhttp.server(\"localhost\") {\n    http.route(\"/*\", http.static(\"/var/www/html\"))\n}\n"
+		ioutil.WriteFile("/etc/wbs/config.ws", []byte(defaultConf), 0644)
+		fmt.Println("Created default config at /etc/wbs/config.ws")
+	}
+
+	err := ioutil.WriteFile("/etc/systemd/system/wbs.service", []byte(serviceContent), 0644)
+	if err != nil {
+		log.Fatalf("Failed to write service file: %v", err)
+	}
+
+	// Make sure wbs is in /usr/bin/wbs if we aren't there already
+	exePath, _ := os.Executable()
+	if exePath != "/usr/bin/wbs" && exePath != "/usr/local/bin/wbs" {
+		exec.Command("cp", exePath, "/usr/bin/wbs").Run()
+	}
+
+	exec.Command("systemctl", "daemon-reload").Run()
+	exec.Command("systemctl", "enable", "wbs").Run()
+	
+	fmt.Println("Service installed! You can now manage WebScript like Nginx:")
+	fmt.Println("  sudo systemctl start wbs")
+	fmt.Println("  sudo systemctl restart wbs")
+	fmt.Println("  sudo systemctl status wbs")
 }
 
 func handleInstallAll() {
@@ -148,6 +201,8 @@ func handleRun(filename string, devMode bool) {
 	env.Set("http.route", &object.Builtin{Fn: engine.BuiltinRoute})
 	env.Set("http.proxy", &object.Builtin{Fn: engine.BuiltinProxy})
 	env.Set("http.static", &object.Builtin{Fn: engine.BuiltinStatic})
+	env.Set("http.php", &object.Builtin{Fn: engine.BuiltinPhp})
+	env.Set("http.secure_ip", &object.Builtin{Fn: engine.BuiltinSecureIp})
 
 	evaluated := evaluator.Eval(program, env)
 	if evaluated != nil && evaluated.Type() == object.ERROR_OBJ {

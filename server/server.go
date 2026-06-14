@@ -4,9 +4,13 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"webscript/evaluator"
 	"webscript/object"
@@ -15,9 +19,10 @@ import (
 )
 
 type RouteTarget struct {
-	Type   string
-	Value  string
-	Action *object.Function
+	Type      string
+	Value     string
+	IndexFile string
+	Action    *object.Function
 }
 
 type ServerConfig struct {
@@ -26,14 +31,21 @@ type ServerConfig struct {
 }
 
 type Engine struct {
-	servers map[string]*ServerConfig
-	current *ServerConfig
+	servers  map[string]*ServerConfig
+	current  *ServerConfig
+	SecureIP bool
 }
 
 func NewEngine() *Engine {
 	return &Engine{
 		servers: make(map[string]*ServerConfig),
 	}
+}
+
+// Builtin: http.secure_ip()
+func (e *Engine) BuiltinSecureIp(args ...object.Object) object.Object {
+	e.SecureIP = true
+	return evaluator.NULL
 }
 
 // Builtin: http.server(domain, func() { ... })
@@ -58,11 +70,9 @@ func (e *Engine) BuiltinServer(args ...object.Object) object.Object {
 	}
 	e.servers[domainObj.Value] = srv
 
-	// Set current context so routes know where to register
 	prev := e.current
 	e.current = srv
 
-	// Execute block
 	evaluator.Eval(blockFunc.Body, blockFunc.Env)
 
 	e.current = prev
@@ -86,7 +96,6 @@ func (e *Engine) BuiltinRoute(args ...object.Object) object.Object {
 
 	switch obj := args[1].(type) {
 	case *object.String:
-		// Either proxy or static, marked by prefix
 		val := obj.Value
 		if strings.HasPrefix(val, "proxy:") {
 			target.Type = "proxy"
@@ -94,6 +103,15 @@ func (e *Engine) BuiltinRoute(args ...object.Object) object.Object {
 		} else if strings.HasPrefix(val, "static:") {
 			target.Type = "static"
 			target.Value = strings.TrimPrefix(val, "static:")
+		} else if strings.HasPrefix(val, "php:") {
+			parts := strings.SplitN(strings.TrimPrefix(val, "php:"), "|", 2)
+			target.Type = "php"
+			target.Value = parts[0]
+			if len(parts) > 1 {
+				target.IndexFile = parts[1]
+			} else {
+				target.IndexFile = "index.php"
+			}
 		} else {
 			return &object.Error{Message: "invalid target string"}
 		}
@@ -101,7 +119,7 @@ func (e *Engine) BuiltinRoute(args ...object.Object) object.Object {
 		target.Type = "function"
 		target.Action = obj
 	default:
-		return &object.Error{Message: "http.route second argument must be proxy, static, or func"}
+		return &object.Error{Message: "http.route second argument must be proxy, static, php, or func"}
 	}
 
 	e.current.Routes[pathObj.Value] = target
@@ -128,6 +146,23 @@ func (e *Engine) BuiltinStatic(args ...object.Object) object.Object {
 		return &object.Error{Message: "http.static argument must be string"}
 	}
 	return &object.String{Value: "static:" + pathObj.Value}
+}
+
+func (e *Engine) BuiltinPhp(args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return &object.Error{Message: "http.php requires at least 1 argument"}
+	}
+	folderObj, ok := args[0].(*object.String)
+	if !ok {
+		return &object.Error{Message: "http.php first argument must be string"}
+	}
+	indexFile := "index.php"
+	if len(args) == 2 {
+		if idxObj, ok := args[1].(*object.String); ok {
+			indexFile = idxObj.Value
+		}
+	}
+	return &object.String{Value: "php:" + folderObj.Value + "|" + indexFile}
 }
 
 func (e *Engine) Start(devMode bool) error {
@@ -174,6 +209,11 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
 	if strings.Contains(host, ":") {
 		host = strings.Split(host, ":")[0]
+	}
+
+	if h.engine.SecureIP && net.ParseIP(host) != nil {
+		http.Error(w, "Forbidden - Direct IP Access Blocked", http.StatusForbidden)
+		return
 	}
 
 	srv, ok := h.engine.servers[host]
@@ -235,16 +275,59 @@ func (h *routerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		prefix := strings.TrimSuffix(matchedPath, "/*")
 		fs := http.StripPrefix(prefix, http.FileServer(http.Dir(folderPath)))
 		fs.ServeHTTP(w, r)
+		
+	case "php":
+		folderPath := matchedTarget.Value
+		prefix := strings.TrimSuffix(matchedPath, "/*")
+		reqPath := strings.TrimPrefix(r.URL.Path, prefix)
+		if reqPath == "" || reqPath == "/" {
+			reqPath = "/" + matchedTarget.IndexFile
+		}
+		fullFilePath := filepath.Join(folderPath, reqPath)
+
+		if strings.HasSuffix(fullFilePath, ".php") {
+			cmd := exec.Command("php-cgi", fullFilePath)
+			cmd.Env = append(os.Environ(),
+				"REQUEST_METHOD="+r.Method,
+				"SCRIPT_FILENAME="+fullFilePath,
+				"QUERY_STRING="+r.URL.RawQuery,
+				"CONTENT_TYPE="+r.Header.Get("Content-Type"),
+				"CONTENT_LENGTH="+r.Header.Get("Content-Length"),
+				"REMOTE_ADDR="+r.RemoteAddr,
+				"SERVER_SOFTWARE=WebScript",
+				"REDIRECT_STATUS=200", // Required by some php-cgi versions
+			)
+			if r.Body != nil {
+				cmd.Stdin = r.Body
+			}
+			out, err := cmd.Output()
+			if err != nil {
+				http.Error(w, "PHP Error: "+err.Error()+"\n(Make sure php-cgi is installed)", http.StatusInternalServerError)
+				return
+			}
+			parts := strings.SplitN(string(out), "\r\n\r\n", 2)
+			if len(parts) == 2 {
+				headers := strings.Split(parts[0], "\r\n")
+				for _, h := range headers {
+					hParts := strings.SplitN(h, ": ", 2)
+					if len(hParts) == 2 {
+						w.Header().Set(hParts[0], hParts[1])
+					}
+				}
+				w.Write([]byte(parts[1]))
+			} else {
+				w.Write(out)
+			}
+		} else {
+			http.ServeFile(w, r, fullFilePath)
+		}
 
 	case "function":
 		reqObj := &object.String{Value: "Request to " + r.URL.Path}
-		
-		// Create a local scope for the function execution
 		env := object.NewEnclosedEnvironment(matchedTarget.Action.Env)
 		if len(matchedTarget.Action.Parameters) > 0 {
 			env.Set(matchedTarget.Action.Parameters[0].Value, reqObj)
 		}
-
 		result := evaluator.Eval(matchedTarget.Action.Body, env)
 		if result != nil {
 			if result.Type() == object.STRING_OBJ {
