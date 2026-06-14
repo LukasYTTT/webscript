@@ -184,8 +184,8 @@ func handleCreate() {
 	fmt.Print("Domain (e.g. example.com or localhost): ")
 	domain, _ := reader.ReadString('\n')
 	domain = strings.TrimSpace(domain)
-	// Remove hidden terminal escape characters
-	domain = regexp.MustCompile(`[^a-zA-Z0-9.\-_]`).ReplaceAllString(domain, "")
+	// Remove hidden terminal escape characters but KEEP the colon for ports
+	domain = regexp.MustCompile(`[^a-zA-Z0-9.\-_:]`).ReplaceAllString(domain, "")
 	if domain == "" {
 		domain = "localhost"
 	}
@@ -221,10 +221,13 @@ func handleCreate() {
 
 	configStr := sb.String()
 	
-	targetPath := fmt.Sprintf("%s.ws", domain)
+	// Replace colons with underscores for a clean filename (e.g. localhost:8080 -> localhost_8080.ws)
+	safeFilename := strings.ReplaceAll(domain, ":", "_")
+	targetPath := fmt.Sprintf("%s.ws", safeFilename)
+	
 	if os.Geteuid() == 0 {
 		if _, err := os.Stat("/etc/wbs/confs"); !os.IsNotExist(err) {
-			targetPath = fmt.Sprintf("/etc/wbs/confs/%s.ws", domain)
+			targetPath = fmt.Sprintf("/etc/wbs/confs/%s.ws", safeFilename)
 		}
 	}
 
